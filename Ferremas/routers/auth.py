@@ -3,8 +3,8 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from Ferremas.sql_app import crud, schemas, models
 from Ferremas.sql_app.dependencies import get_db
-from jose import JWTError, jwt
-from datetime import datetime, timedelta
+import jwt
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 router = APIRouter()
@@ -15,7 +15,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 def create_access_token(data: dict):
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
@@ -29,7 +29,7 @@ def login_for_access_token(db: Session = Depends(get_db), form_data: OAuth2Passw
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    access_token = create_access_token(data={"sub": user.username})
+    access_token = create_access_token(data={"sub": user.username, "role": user.role})
     return {"access_token": access_token, "token_type": "bearer"}
 
 def authenticate_user(db: Session, username: Optional[str], password: Optional[str]) -> Optional[models.User]:

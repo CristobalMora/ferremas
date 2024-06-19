@@ -1,15 +1,14 @@
 from sqlalchemy.orm import Session
 from Ferremas.sql_app.database import SessionLocal
 from fastapi import Depends, HTTPException, status
-from jose import JWTError, jwt
+import jwt
 from fastapi.security import OAuth2PasswordBearer
 from Ferremas.sql_app import models
-from datetime import datetime, timedelta
 from typing import Optional
 
 SECRET_KEY = "your_secret_key"
 ALGORITHM = "HS256"
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
 
 def get_db():
     db = SessionLocal()
@@ -27,9 +26,12 @@ def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         username: Optional[str] = payload.get("sub")
-        if username is None:
+        role: Optional[str] = payload.get("role")
+        if username is None or role is None:
             raise credentials_exception
-    except JWTError:
+    except jwt.ExpiredSignatureError:
+        raise credentials_exception
+    except jwt.InvalidTokenError:
         raise credentials_exception
     user = db.query(models.User).filter(models.User.username == username).first()
     if user is None:

@@ -46,3 +46,4 @@ websockets==12.0
 pytest
 bcrypt
 pytest-asyncio
+PyJWT
