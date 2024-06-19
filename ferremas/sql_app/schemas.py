@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 from typing import List, Optional
 
 class UserBase(BaseModel):
@@ -6,20 +6,14 @@ class UserBase(BaseModel):
     email: str
     role: str
 
-class UserCreate(BaseModel):
-    username: str
-    email: str
+class UserCreate(UserBase):
     password: str
-    role: str
-
-    class Config:
-        from_attributes = True
 
 class UserResponse(UserBase):
     id: int
 
     class Config:
-        orm_mode = True  # Actualiza a ConfigDict si es necesario en Pydantic V2
+        from_attributes = True
 
 class ProductBase(BaseModel):
     name: str
@@ -32,7 +26,7 @@ class ProductResponse(ProductBase):
     id: int
 
     class Config:
-        orm_mode = True  # Actualiza a ConfigDict si es necesario en Pydantic V2
+        from_attributes = True
 
 class CartItemBase(BaseModel):
     product_id: int
@@ -46,7 +40,7 @@ class CartItemResponse(CartItemBase):
     product: ProductResponse
 
     class Config:
-        orm_mode = True  # Actualiza a ConfigDict si es necesario en Pydantic V2
+        from_attributes = True
 
 class Token(BaseModel):
     access_token: str

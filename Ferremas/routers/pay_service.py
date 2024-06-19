@@ -1,12 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sql_app import models
-from sql_app.dependencies import get_db, get_current_user
+from Ferremas.sql_app import models
+from Ferremas.sql_app.dependencies import get_db, get_current_user
 import uuid
 
 router = APIRouter()
 
-@router.post("/", response_model=dict)
+@router.post("/", response_model=dict, tags=["Payment Service"])
 def pay(db: Session = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     if str(current_user.role) != "cliente":
         raise HTTPException(status_code=403, detail="Operation not permitted")

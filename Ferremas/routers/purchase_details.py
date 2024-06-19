@@ -1,12 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sql_app import models, schemas, crud
-from sql_app.dependencies import get_current_user, get_db
+from Ferremas.sql_app import models, schemas, crud
+from Ferremas.sql_app.dependencies import get_current_user, get_db
 from typing import List
 
 router = APIRouter()
 
-@router.get("/", response_model=List[schemas.CartItemCreate])
+@router.get("/", response_model=List[schemas.CartItemCreate], tags=["Purchase Details"])
 def read_purchase_details(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
