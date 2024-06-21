@@ -1,14 +1,17 @@
-from sqlalchemy.orm import Session
-from Ferremas.sql_app.database import SessionLocal
 from fastapi import Depends, HTTPException, status
-import jwt
 from fastapi.security import OAuth2PasswordBearer
-from Ferremas.sql_app import models
+from jose import JWTError, jwt
+from sqlalchemy.orm import Session
+from datetime import datetime, timedelta, timezone
 from typing import Optional
+
+from Ferremas.sql_app import models
+from Ferremas.sql_app.database import SessionLocal
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
 
 SECRET_KEY = "your_secret_key"
 ALGORITHM = "HS256"
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
 
 def get_db():
     db = SessionLocal()
@@ -25,15 +28,13 @@ def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_
     )
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: Optional[str] = payload.get("sub")
+        email: Optional[str] = payload.get("sub")
         role: Optional[str] = payload.get("role")
-        if username is None or role is None:
+        if email is None or role is None:
             raise credentials_exception
-    except jwt.ExpiredSignatureError:
+    except JWTError:
         raise credentials_exception
-    except jwt.InvalidTokenError:
-        raise credentials_exception
-    user = db.query(models.User).filter(models.User.username == username).first()
+    user = db.query(models.User).filter(models.User.email == email).first()  # Usa 'email' en lugar de 'username'
     if user is None:
         raise credentials_exception
     return user
