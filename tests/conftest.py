@@ -4,9 +4,12 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from main import app
+from main import app  # Asegúrate de que 'main.py' está en el directorio raíz
 from Ferremas.sql_app.database import Base
 from Ferremas.sql_app.dependencies import get_db
+
+# Asegúrate de que el directorio raíz está en el sys.path
+sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 
 # Configuración de la base de datos para pruebas
 SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
