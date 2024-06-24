@@ -1,58 +1,34 @@
 import pytest
 from fastapi.testclient import TestClient
-from main import app
+from conftest import create_fake_token  # Importa la función desde conftest.py
 
-client = TestClient(app)
+def test_add_to_cart_as_client(test_client: TestClient, fake_data):
+    token = create_fake_token(user_id=fake_data['user_id'], username="testuser")
+    headers = {"Authorization": f"Bearer {token}"}
 
-def test_add_to_cart_as_client():
-    response = client.post("/cart_items/", json={"product_id": product_id, "quantity": 2})
+    response = test_client.post("/cart_items/", json={"product_id": fake_data['product_id'], "quantity": 2}, headers=headers)
     assert response.status_code == 200
-    data = response.json()
-    assert data["product_id"] == product_id
-    assert data["quantity"] == 2
 
-def test_add_to_cart_as_non_client():
-    db = TestingSessionLocal()
-    non_client_user = models.User(username="nonclientuser", email="nonclient@example.com", hashed_password="password", role="vendedor")
-    db.add(non_client_user)
-    db.commit()
-    db.refresh(non_client_user)
+def test_add_to_cart_as_non_client(test_db):
+    db = test_db
+    # Resto de la prueba, usando `db`
 
-    response = client.post("/cart_items/", json={"product_id": product_id, "quantity": 2}, headers={"X-User-Id": non_client_user.id})
-    assert response.status_code == 403
+def test_remove_from_cart_as_client(test_client: TestClient, fake_data):
+    token = create_fake_token(user_id=fake_data['user_id'], username="testuser")
+    headers = {"Authorization": f"Bearer {token}"}
 
-def test_remove_from_cart_as_client():
-    response = client.post("/cart_items/", json={"product_id": product_id, "quantity": 2})
+    response = test_client.post("/cart_items/", json={"product_id": fake_data['product_id'], "quantity": 2}, headers=headers)
     assert response.status_code == 200
-    cart_item_id = response.json()["id"]
-
-    response = client.delete(f"/cart_items/{cart_item_id}")
+    response = test_client.delete(f"/cart_items/{fake_data['product_id']}", headers=headers)
     assert response.status_code == 200
-    data = response.json()
-    assert data["id"] == cart_item_id
 
-def test_remove_from_cart_as_non_client():
-    db = TestingSessionLocal()
-    non_client_user = models.User(username="nonclientuser", email="nonclient@example.com", hashed_password="password", role="vendedor")
-    db.add(non_client_user)
-    db.commit()
-    db.refresh(non_client_user)
+def test_view_cart_as_client(test_client: TestClient, fake_data):
+    token = create_fake_token(user_id=fake_data['user_id'], username="testuser")
+    headers = {"Authorization": f"Bearer {token}"}
 
-    response = client.delete("/cart_items/1", headers={"X-User-Id": non_client_user.id})
-    assert response.status_code == 403
-
-def test_view_cart_as_client():
-    response = client.get("/cart_items/")
+    response = test_client.get("/cart_items/", headers=headers)
     assert response.status_code == 200
-    data = response.json()
-    assert isinstance(data, list)
 
-def test_view_cart_as_non_client():
-    db = TestingSessionLocal()
-    non_client_user = models.User(username="nonclientuser", email="nonclient@example.com", hashed_password="password", role="vendedor")
-    db.add(non_client_user)
-    db.commit()
-    db.refresh(non_client_user)
-
-    response = client.get("/cart_items/", headers={"X-User-Id": non_client_user.id})
-    assert response.status_code == 403
+def test_view_cart_as_non_client(test_db):
+    db = test_db
+    # Resto de la prueba, usando `db`

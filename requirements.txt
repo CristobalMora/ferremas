@@ -11,3 +11,4 @@ pytest-cov
 python-multipart
 passlib
 bcrypt
+pyjwt

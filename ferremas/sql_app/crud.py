@@ -10,10 +10,10 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 logging.basicConfig(level=logging.INFO)
 
-def get_user_by_username(db: Session, username: str) -> models.User:
-    return db.query(models.User).filter(models.User.username == username).first()
+def get_user_by_id(db: Session, user_id: int):
+    return db.query(models.User).filter(models.User.id == user_id).first()
 
-def get_user_by_email(db: Session, email: str) -> models.User:
+def get_user_by_email(db: Session, email: str):
     return db.query(models.User).filter(models.User.email == email).first()
 
 def get_user_by_id(db: Session, user_id: int):
@@ -35,13 +35,19 @@ def create_user(db: Session, user: schemas.UserCreate):
     db.refresh(db_user)
     return db_user
 
-def verify_password(plain_password: str, hashed_password: str) -> bool:
+def verify_password(plain_password: str, hashed_password: str):
     return pwd_context.verify(plain_password, hashed_password)
 
 def update_user(db: Session, user_id: int, user: schemas.UserCreate):
     db_user = get_user_by_id(db, user_id)
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # Verificar si el nuevo correo electrónico ya está en uso
+    if user.email and user.email != db_user.email:
+        existing_user = get_user_by_email(db, user.email)
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Email already registered")
 
     user_dict = user.dict(exclude_unset=True)
     if user.password:
