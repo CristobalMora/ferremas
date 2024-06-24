@@ -1,28 +1,16 @@
 from fastapi import FastAPI
-from Ferremas.routers import auth, cart_items, inventory, items, pay_service, productos, purchase_details, receipts, sales, users,cart_summary
-from Ferremas.sql_app.database import engine, Base
+from database import engine, Base
+from app.routers import user, auth, inventory, sales, cart, cart_summary, dispatch, payment
 
+Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
-# Reiniciar base de datos cada vez que se inicie otra vez (comentar si no se quiere reiniciar)
-# Base.metadata.drop_all(bind=engine)
-Base.metadata.create_all(bind=engine)
-
-# Incluir routers de diferentes módulos con tags
-app.include_router(auth.router, prefix="/auth", tags=["Authentication"])
-app.include_router(users.router, prefix="/users", tags=["Users"])
-app.include_router(inventory.router, prefix="/inventory", tags=["Inventory"])
-app.include_router(items.router, prefix="/items", tags=["Items"])
-app.include_router(productos.router, prefix="/productos", tags=["Products"])
-app.include_router(cart_items.router, prefix="/cart_items", tags=["Cart"])
-app.include_router(cart_summary.router, prefix="/cart_summary", tags=["Cart Summary"])
-app.include_router(pay_service.router, prefix="/pay_service", tags=["Payment Service"])
-app.include_router(purchase_details.router, prefix="/purchase_details", tags=["Purchase Details"])
-app.include_router(receipts.router, prefix="/receipts", tags=["Receipts"])
-app.include_router(sales.router, prefix="/sales", tags=["Sales"])
-
-# Endpoint raíz
-@app.get("/", tags=["Root"])
-def read_root():
-    return {"Hello": "Bienvenidos a Ferremas"}
+app.include_router(user.router, prefix="/users", tags=["users"])
+app.include_router(auth.router, tags=["auth"])
+app.include_router(inventory.router, prefix="/inventory", tags=["inventory"])
+app.include_router(sales.router, prefix="/sales", tags=["sales"])
+app.include_router(cart.router, prefix="/cart", tags=["cart"])
+app.include_router(cart_summary.router, prefix="/cart_summary", tags=["cart_summary"])
+app.include_router(dispatch.router, prefix="/dispatch", tags=["dispatch"])
+app.include_router(payment.router, prefix="/payments", tags=["payments"])
