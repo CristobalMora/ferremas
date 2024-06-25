@@ -5,6 +5,7 @@ from database import get_db
 
 router = APIRouter()
 
+
 @router.post("/", response_model=schemas.User)
 def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     db_user = repository.get_user_by_email(db, user.correo)
@@ -19,6 +20,10 @@ def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     )
     repository.create_user(db, db_user)
     return db_user
+
+@router.get("/me", response_model=schemas.User)
+def read_users_me(current_user: schemas.User = Depends(service.get_current_user)):
+    return current_user
 
 @router.get("/{user_id}", response_model=schemas.User)
 def read_user(user_id: int, db: Session = Depends(get_db)):

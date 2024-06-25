@@ -6,6 +6,8 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
+print("App initialized")
+
 app.include_router(user.router, prefix="/users", tags=["users"])
 app.include_router(auth.router, tags=["auth"])
 app.include_router(inventory.router, prefix="/inventory", tags=["inventory"])

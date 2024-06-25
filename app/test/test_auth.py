@@ -1,18 +1,23 @@
 import pytest
+from fastapi import Depends
 from fastapi.testclient import TestClient
+from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from app.domain.user import models as user_models
-from database import Base, get_db
 from main import app
+from app.domain.user import models, schemas
+from database import Base, get_db
 from faker import Faker
+from jose import jwt
+from datetime import datetime, timedelta, timezone
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
-
 engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Dependencia sobreescrita para pruebas
+Base.metadata.create_all(bind=engine)
+
 def override_get_db():
     try:
         db = TestingSessionLocal()
@@ -22,40 +27,119 @@ def override_get_db():
 
 app.dependency_overrides[get_db] = override_get_db
 
+client = TestClient(app)
+faker = Faker()
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+SECRET_KEY = "your_secret_key"
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 1
+
 @pytest.fixture(scope="module")
-def test_client():
+def test_db():
     Base.metadata.create_all(bind=engine)
-    client = TestClient(app)
-    yield client
+    yield
     Base.metadata.drop_all(bind=engine)
 
-fake = Faker()
-
 @pytest.fixture(scope="module")
-def fake_user():
-    return {
-        "nombre": fake.name(),
-        "correo": fake.email(),
-        "password": "password123",
+def test_user():
+    fake_user = {
+        "nombre": faker.name(),
+        "correo": faker.email(),
+        "password": faker.password(),
         "role": "Cliente"
     }
-
-@pytest.fixture(scope="module")
-def access_token(test_client, fake_user):
-    # Crear el usuario
-    response = test_client.post(
+    response = client.post(
         "/users/",
-        json=fake_user
+        json=fake_user,
     )
     assert response.status_code == 200
-    # Obtener el token
-    response = test_client.post(
+    return fake_user
+
+def test_login_for_access_token_success(test_db, test_user):
+    response = client.post(
         "/token",
-        data={"username": fake_user["correo"], "password": fake_user["password"]},
-        headers={"Content-Type": "application/x-www-form-urlencoded"}
+        data={"username": test_user["correo"], "password": test_user["password"]}
     )
     assert response.status_code == 200
-    data = response.json()
-    assert "access_token" in data
-    assert data["token_type"] == "bearer"
-    return data["access_token"]
+    token = response.json()
+    assert "access_token" in token
+    assert token["token_type"] == "bearer"
+
+def test_login_for_access_token_failure(test_db):
+    response = client.post(
+        "/token",
+        data={"username": "wrong@example.com", "password": "wrongpassword"}
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Incorrect username or password"
+
+def test_access_protected_route_with_valid_token(test_db, test_user):
+    response = client.post(
+        "/token",
+        data={"username": test_user["correo"], "password": test_user["password"]}
+    )
+    assert response.status_code == 200
+    token = response.json()["access_token"]
+
+    response = client.get(
+        "/users/me",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 200
+    user_data = response.json()
+    assert user_data["correo"] == test_user["correo"]
+
+def test_access_protected_route_without_token(test_db):
+    response = client.get("/users/me")
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Not authenticated"
+
+def test_access_protected_route_with_invalid_token(test_db):
+    invalid_token = "invalidtoken"
+    response = client.get(
+        "/users/me",
+        headers={"Authorization": f"Bearer {invalid_token}"}
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Could not validate credentials"
+
+def test_access_protected_route_with_expired_token(test_db, test_user):
+    # Create an expired token
+    expired_token = jwt.encode({
+        "sub": test_user["correo"],
+        "exp": datetime.now(timezone.utc) - timedelta(minutes=1)
+    }, SECRET_KEY, algorithm=ALGORITHM)
+
+    response = client.get(
+        "/users/me",
+        headers={"Authorization": f"Bearer {expired_token}"}
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Could not validate credentials"
+
+def test_access_protected_route_with_manipulated_token(test_db, test_user):
+    # Create a valid token and manipulate it
+    valid_token = jwt.encode({
+        "sub": test_user["correo"],
+        "exp": datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    }, SECRET_KEY, algorithm=ALGORITHM)
+    manipulated_token = valid_token + "manipulated"
+
+    response = client.get(
+        "/users/me",
+        headers={"Authorization": f"Bearer {manipulated_token}"}
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Could not validate credentials"
+
+def test_token_generation(test_db, test_user):
+    response = client.post(
+        "/token",
+        data={"username": test_user["correo"], "password": test_user["password"]}
+    )
+    assert response.status_code == 200
+    token = response.json()
+    decoded_token = jwt.decode(token["access_token"], SECRET_KEY, algorithms=[ALGORITHM])
+    assert decoded_token["sub"] == test_user["correo"]

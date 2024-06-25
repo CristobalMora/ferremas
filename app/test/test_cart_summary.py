@@ -1,20 +1,23 @@
 import pytest
+from fastapi import Depends
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from app.domain.user import models as user_models
+from main import app
 from app.domain.cart import models as cart_models
 from app.domain.sales import models as sales_models
+from app.domain.inventory import models as inventory_models
+from app.domain.user.models import User
 from database import Base, get_db
-from main import app
 from faker import Faker
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
-
 engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Dependencia sobreescrita para pruebas
+Base.metadata.create_all(bind=engine)
+
 def override_get_db():
     try:
         db = TestingSessionLocal()
@@ -24,51 +27,90 @@ def override_get_db():
 
 app.dependency_overrides[get_db] = override_get_db
 
+client = TestClient(app)
+faker = Faker()
+
 @pytest.fixture(scope="module")
-def test_client():
+def test_db():
     Base.metadata.create_all(bind=engine)
-    client = TestClient(app)
-    yield client
+    yield
     Base.metadata.drop_all(bind=engine)
 
-fake = Faker()
-
 @pytest.fixture(scope="module")
-def cliente_user(test_client):
-    user_data = {
-        "nombre": fake.name(),
-        "correo": fake.email(),
-        "password": "password123",
+def test_user():
+    fake_user = {
+        "nombre": faker.name(),
+        "correo": faker.email(),
+        "password": faker.password(),
         "role": "Cliente"
     }
-    response = test_client.post(
+    response = client.post(
         "/users/",
-        json=user_data
+        json=fake_user,
     )
     assert response.status_code == 200
-    return user_data
+    fake_user.update(response.json())
+    return fake_user
 
 @pytest.fixture(scope="module")
-def cliente_token(test_client, cliente_user):
-    response = test_client.post(
+def token(test_user):
+    response = client.post(
         "/token",
-        data={"username": cliente_user["correo"], "password": "password123"},
-        headers={"Content-Type": "application/x-www-form-urlencoded"}
+        data={"username": test_user["correo"], "password": test_user["password"]}
     )
     assert response.status_code == 200
-    data = response.json()
-    assert "access_token" in data
-    assert data["token_type"] == "bearer"
-    return data["access_token"]
+    return response.json()["access_token"]
 
-def test_get_cart_summary(test_client, cliente_token):
-    headers = {"Authorization": f"Bearer {cliente_token}"}
-    response = test_client.get(
+@pytest.fixture(scope="module")
+def test_cart_item(test_db, test_user):
+    db = TestingSessionLocal()
+
+    # Crear un producto de inventario
+    fake_inventory = inventory_models.Inventory(
+        product_name=faker.word(),
+        description=faker.text(),  # Ajustar para usar el nombre correcto del atributo
+        price=faker.pyfloat(min_value=1, max_value=100, right_digits=2),
+        quantity=faker.random_int(min=1, max=100)
+    )
+    db.add(fake_inventory)
+    db.commit()
+    db.refresh(fake_inventory)
+
+    # Crear una venta
+    fake_sale = sales_models.Sale(
+        product_id=fake_inventory.id,
+        price=fake_inventory.price
+    )
+    db.add(fake_sale)
+    db.commit()
+    db.refresh(fake_sale)
+
+    # Crear un ítem de carrito
+    fake_cart_item = cart_models.CartItem(
+        user_id=test_user["id"],
+        sale_id=fake_sale.id,
+        quantity=faker.random_int(min=1, max=10)
+    )
+    db.add(fake_cart_item)
+    db.commit()
+    db.refresh(fake_cart_item)
+
+    db.close()
+    return fake_cart_item
+
+def test_get_cart_summary(test_db, token, test_cart_item):
+    response = client.get(
         "/cart_summary/",
-        headers=headers
+        headers={"Authorization": f"Bearer {token}"}
     )
     assert response.status_code == 200, response.text
     data = response.json()
-    assert isinstance(data, dict)
     assert "items" in data
     assert "total_amount" in data
+    assert len(data["items"]) > 0
+    assert data["total_amount"] > 0
+
+def test_get_cart_summary_unauthorized(test_db):
+    response = client.get("/cart_summary/")
+    assert response.status_code == 401, response.text
+    assert response.json()["detail"] == "Not authenticated"

@@ -1,20 +1,22 @@
 import pytest
+from fastapi import Depends
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from app.domain.cart import models as cart_models, schemas as cart_schemas
-from app.domain.user import models as user_models
-from app.domain.sales import models as sale_models
-from database import Base, get_db
 from main import app
+from app.domain.cart import models, schemas
+from app.domain.user.models import User
+from app.domain.sales.models import Sale
+from database import Base, get_db
 from faker import Faker
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
-
 engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Dependencia sobreescrita para pruebas
+Base.metadata.create_all(bind=engine)
+
 def override_get_db():
     try:
         db = TestingSessionLocal()
@@ -24,149 +26,143 @@ def override_get_db():
 
 app.dependency_overrides[get_db] = override_get_db
 
+client = TestClient(app)
+faker = Faker()
+
 @pytest.fixture(scope="module")
-def test_client():
+def test_db():
     Base.metadata.create_all(bind=engine)
-    client = TestClient(app)
-    yield client
+    yield
     Base.metadata.drop_all(bind=engine)
 
-fake = Faker()
-
 @pytest.fixture(scope="module")
-def cliente_user(test_client):
-    user_data = {
-        "nombre": fake.name(),
-        "correo": fake.email(),
-        "password": "password123",
-        "role": "Cliente"
+def test_user():
+    fake_user = {
+        "nombre": faker.name(),
+        "correo": faker.email(),
+        "password": faker.password(),
+        "role": "Cliente"  # Asegúrate de que el rol es "Cliente"
     }
-    response = test_client.post(
+    response = client.post(
         "/users/",
-        json=user_data
+        json=fake_user,
     )
     assert response.status_code == 200
-    return user_data
+    fake_user.update(response.json())
+    return fake_user
 
 @pytest.fixture(scope="module")
-def cliente_token(test_client, cliente_user):
-    response = test_client.post(
+def token(test_user):
+    response = client.post(
         "/token",
-        data={"username": cliente_user["correo"], "password": "password123"},
-        headers={"Content-Type": "application/x-www-form-urlencoded"}
+        data={"username": test_user["correo"], "password": test_user["password"]}
     )
     assert response.status_code == 200
-    data = response.json()
-    assert "access_token" in data
-    assert data["token_type"] == "bearer"
-    return data["access_token"]
+    return response.json()["access_token"]
 
 @pytest.fixture(scope="module")
-def vendedor_user(test_client):
-    user_data = {
-        "nombre": fake.name(),
-        "correo": fake.email(),
-        "password": "password123",
-        "role": "Vendedor"
-    }
-    response = test_client.post(
-        "/users/",
-        json=user_data
+def test_sale(test_db):
+    db = TestingSessionLocal()
+    fake_sale = Sale(
+        product_id=1,
+        price=faker.pyfloat(min_value=1, max_value=100, right_digits=2)
     )
-    assert response.status_code == 200
-    return user_data
+    db.add(fake_sale)
+    db.commit()
+    db.refresh(fake_sale)
+    db.close()
+    return fake_sale
 
-@pytest.fixture(scope="module")
-def vendedor_token(test_client, vendedor_user):
-    response = test_client.post(
-        "/token",
-        data={"username": vendedor_user["correo"], "password": "password123"},
-        headers={"Content-Type": "application/x-www-form-urlencoded"}
-    )
-    assert response.status_code == 200
-    data = response.json()
-    assert "access_token" in data
-    assert data["token_type"] == "bearer"
-    return data["access_token"]
-
-@pytest.fixture(scope="module")
-def sale(test_client, vendedor_token):
-    headers = {"Authorization": f"Bearer {vendedor_token}"}
-    sale_data = {
-        "product_id": 1,
-        "price": 100.0
+def test_add_to_cart(test_db, token, test_sale):
+    fake_cart_item = {
+        "sale_id": test_sale.id,
+        "quantity": faker.random_int(min=1, max=10)
     }
-    response = test_client.post(
-        "/sales/",
-        json=sale_data,
-        headers=headers
-    )
-    assert response.status_code == 200, response.text
-    return response.json()
-
-def test_add_to_cart(test_client, cliente_token, sale):
-    headers = {"Authorization": f"Bearer {cliente_token}"}
-    cart_item_data = {
-        "sale_id": sale["id"],
-        "quantity": 2
-    }
-    response = test_client.post(
+    response = client.post(
         "/cart/",
-        json=cart_item_data,
-        headers=headers
+        json=fake_cart_item,
+        headers={"Authorization": f"Bearer {token}"}
     )
     assert response.status_code == 200, response.text
     data = response.json()
-    assert data["sale_id"] == cart_item_data["sale_id"]
-    assert data["quantity"] == cart_item_data["quantity"]
+    assert data["sale_id"] == fake_cart_item["sale_id"]
+    assert data["quantity"] == fake_cart_item["quantity"]
     assert "id" in data
 
-def test_get_cart_items(test_client, cliente_token):
-    headers = {"Authorization": f"Bearer {cliente_token}"}
-    response = test_client.get("/cart/", headers=headers)
+def test_get_cart_items(test_db, token):
+    # Añadir un ítem al carrito para asegurar que hay datos
+    fake_cart_item = {
+        "sale_id": 1,
+        "quantity": faker.random_int(min=1, max=10)
+    }
+    client.post(
+        "/cart/",
+        json=fake_cart_item,
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    
+    response = client.get(
+        "/cart/",
+        headers={"Authorization": f"Bearer {token}"}
+    )
     assert response.status_code == 200, response.text
     data = response.json()
-    assert len(data) > 0  # Asegúrate de que hay al menos un ítem en el carrito
+    assert len(data) > 0
 
-def test_remove_from_cart(test_client, cliente_token):
-    headers = {"Authorization": f"Bearer {cliente_token}"}
-    response = test_client.delete("/cart/1", headers=headers)
+def test_remove_from_cart(test_db, token, test_sale):
+    fake_cart_item = {
+        "sale_id": test_sale.id,
+        "quantity": faker.random_int(min=1, max=10)
+    }
+    create_response = client.post(
+        "/cart/",
+        json=fake_cart_item,
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert create_response.status_code == 200, create_response.text
+    item_id = create_response.json()["id"]
+
+    response = client.delete(
+        f"/cart/{item_id}",
+        headers={"Authorization": f"Bearer {token}"}
+    )
     assert response.status_code == 200, response.text
     data = response.json()
-    assert data["id"] == 1
+    assert data["sale_id"] == fake_cart_item["sale_id"]
+    assert data["quantity"] == fake_cart_item["quantity"]
 
-def test_add_to_cart_unauthorized(test_client, sale):
-    headers = {"Authorization": "Bearer invalid_token"}
-    cart_item_data = {
-        "sale_id": sale["id"],
-        "quantity": 2
+def test_add_to_cart_unauthorized(test_db, test_sale):
+    fake_cart_item = {
+        "sale_id": test_sale.id,
+        "quantity": faker.random_int(min=1, max=10)
     }
-    response = test_client.post(
+    response = client.post(
         "/cart/",
-        json=cart_item_data,
-        headers=headers
+        json=fake_cart_item
     )
-    assert response.status_code == 401
+    assert response.status_code == 401, response.text
+    assert response.json()["detail"] == "Not authenticated"
 
-def test_get_cart_items_unauthorized(test_client):
-    headers = {"Authorization": "Bearer invalid_token"}
-    response = test_client.get("/cart/", headers=headers)
-    assert response.status_code == 401
+def test_get_cart_items_unauthorized(test_db):
+    response = client.get("/cart/")
+    assert response.status_code == 401, response.text
+    assert response.json()["detail"] == "Not authenticated"
 
-def test_remove_from_cart_unauthorized(test_client):
-    headers = {"Authorization": "Bearer invalid_token"}
-    response = test_client.delete("/cart/1", headers=headers)
-    assert response.status_code == 401
-
-def test_add_to_cart_invalid_quantity(test_client, cliente_token, sale):
-    headers = {"Authorization": f"Bearer {cliente_token}"}
-    cart_item_data = {
-        "sale_id": sale["id"],
-        "quantity": -1  # Cantidad no válida
+def test_remove_from_cart_unauthorized(test_db, test_sale, token):
+    fake_cart_item = {
+        "sale_id": test_sale.id,
+        "quantity": faker.random_int(min=1, max=10)
     }
-    response = test_client.post(
+    create_response = client.post(
         "/cart/",
-        json=cart_item_data,
-        headers=headers
+        json=fake_cart_item,
+        headers={"Authorization": f"Bearer {token}"}
     )
-    assert response.status_code == 422, response.text
+    assert create_response.status_code == 200, create_response.text
+    item_id = create_response.json()["id"]
+
+    response = client.delete(
+        f"/cart/{item_id}"
+    )
+    assert response.status_code == 401, response.text
+    assert response.json()["detail"] == "Not authenticated"

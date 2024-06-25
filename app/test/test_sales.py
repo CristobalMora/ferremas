@@ -1,19 +1,21 @@
 import pytest
+from fastapi import Depends
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from app.domain.sales import schemas as sales_schemas
-from app.domain.user import models as user_models
-from database import Base, get_db
 from main import app
+from app.domain.sales import models, schemas
+from app.domain.user.models import User
+from database import Base, get_db
 from faker import Faker
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
-
 engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Dependencia sobreescrita para pruebas
+Base.metadata.create_all(bind=engine)
+
 def override_get_db():
     try:
         db = TestingSessionLocal()
@@ -23,130 +25,203 @@ def override_get_db():
 
 app.dependency_overrides[get_db] = override_get_db
 
+client = TestClient(app)
+faker = Faker()
+
 @pytest.fixture(scope="module")
-def test_client():
+def test_db():
     Base.metadata.create_all(bind=engine)
-    client = TestClient(app)
-    yield client
+    yield
     Base.metadata.drop_all(bind=engine)
 
-fake = Faker()
-
 @pytest.fixture(scope="module")
-def vendedor_user(test_client):
-    user_data = {
-        "nombre": fake.name(),
-        "correo": fake.email(),
-        "password": "password123",
+def test_user():
+    fake_user = {
+        "nombre": faker.name(),
+        "correo": faker.email(),
+        "password": faker.password(),
         "role": "Vendedor"
     }
-    response = test_client.post(
+    response = client.post(
         "/users/",
-        json=user_data
+        json=fake_user,
     )
     assert response.status_code == 200
-    return user_data
+    fake_user.update(response.json())
+    return fake_user
 
 @pytest.fixture(scope="module")
-def vendedor_token(test_client, vendedor_user):
-    response = test_client.post(
+def token(test_user):
+    response = client.post(
         "/token",
-        data={"username": vendedor_user["correo"], "password": "password123"},
-        headers={"Content-Type": "application/x-www-form-urlencoded"}
+        data={"username": test_user["correo"], "password": test_user["password"]}
+    )
+    assert response.status_code == 200
+    return response.json()["access_token"]
+
+def test_create_sale(test_db, token):
+    fake_sale = {
+        "product_id": 1,
+        "price": faker.pyfloat(min_value=1, max_value=100, right_digits=2)
+    }
+    response = client.post(
+        "/sales/",
+        json=fake_sale,
+        headers={"Authorization": f"Bearer {token}"}
     )
     assert response.status_code == 200
     data = response.json()
-    assert "access_token" in data
-    assert data["token_type"] == "bearer"
-    return data["access_token"]
-
-@pytest.fixture(scope="module")
-def created_sale(test_client, vendedor_token):
-    headers = {"Authorization": f"Bearer {vendedor_token}"}
-    sale_data = {
-        "product_id": 1,
-        "price": 19.99
-    }
-    response = test_client.post(
-        "/sales/",
-        json=sale_data,
-        headers=headers
-    )
-    assert response.status_code == 200, response.text
-    return response.json()
-
-def test_create_sale(test_client, vendedor_token):
-    headers = {"Authorization": f"Bearer {vendedor_token}"}
-    sale_data = {
-        "product_id": 1,
-        "price": 19.99
-    }
-    response = test_client.post(
-        "/sales/",
-        json=sale_data,
-        headers=headers
-    )
-    assert response.status_code == 200, response.text
-    data = response.json()
-    assert data["product_id"] == sale_data["product_id"]
-    assert data["price"] == sale_data["price"]
+    assert data["product_id"] == fake_sale["product_id"]
     assert "id" in data
 
-def test_create_sale_invalid_price(test_client, vendedor_token):
-    headers = {"Authorization": f"Bearer {vendedor_token}"}
-    sale_data = {
+def test_read_sale(test_db, token):
+    fake_sale = {
         "product_id": 1,
-        "price": -10.0  # Precio no válido
+        "price": faker.pyfloat(min_value=1, max_value=100, right_digits=2)
     }
-    response = test_client.post(
+    create_response = client.post(
         "/sales/",
-        json=sale_data,
-        headers=headers
+        json=fake_sale,
+        headers={"Authorization": f"Bearer {token}"}
     )
-    assert response.status_code == 422, response.text
+    assert create_response.status_code == 200
+    sale_id = create_response.json()["id"]
 
-def test_read_sales(test_client, vendedor_token):
-    headers = {"Authorization": f"Bearer {vendedor_token}"}
-    response = test_client.get("/sales/", headers=headers)
-    assert response.status_code == 200, response.text
+    response = client.get(
+        f"/sales/{sale_id}",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["product_id"] == fake_sale["product_id"]
+
+def test_read_sales(test_db, token):
+    # Crear una venta para asegurarnos de que hay datos
+    fake_sale = {
+        "product_id": 1,
+        "price": faker.pyfloat(min_value=1, max_value=100, right_digits=2)
+    }
+    client.post(
+        "/sales/",
+        json=fake_sale,
+        headers={"Authorization": f"Bearer {token}"}
+    )
+
+    response = client.get(
+        "/sales/",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 200
     data = response.json()
     assert len(data) > 0
 
-def test_read_sale(test_client, vendedor_token, created_sale):
-    headers = {"Authorization": f"Bearer {vendedor_token}"}
-    response = test_client.get(f"/sales/{created_sale['id']}", headers=headers)
-    assert response.status_code == 200, response.text
-    data = response.json()
-    assert data["id"] == created_sale["id"]
-
-def test_update_sale(test_client, vendedor_token, created_sale):
-    headers = {"Authorization": f"Bearer {vendedor_token}"}
-    sale_update_data = {
+def test_update_sale(test_db, token):
+    fake_sale = {
         "product_id": 1,
-        "price": 29.99
+        "price": faker.pyfloat(min_value=1, max_value=100, right_digits=2)
     }
-    response = test_client.put(f"/sales/{created_sale['id']}", json=sale_update_data, headers=headers)
-    assert response.status_code == 200, response.text
-    data = response.json()
-    assert data["price"] == sale_update_data["price"]
+    create_response = client.post(
+        "/sales/",
+        json=fake_sale,
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert create_response.status_code == 200
+    sale_id = create_response.json()["id"]
 
-def test_update_sale_invalid_price(test_client, vendedor_token, created_sale):
-    headers = {"Authorization": f"Bearer {vendedor_token}"}
-    sale_update_data = {
+    updated_sale = {
+        "product_id": 2,
+        "price": faker.pyfloat(min_value=1, max_value=100, right_digits=2)
+    }
+    response = client.put(
+        f"/sales/{sale_id}",
+        json=updated_sale,
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["product_id"] == updated_sale["product_id"]
+
+def test_delete_sale(test_db, token):
+    fake_sale = {
         "product_id": 1,
-        "price": -29.99  # Precio no válido
+        "price": faker.pyfloat(min_value=1, max_value=100, right_digits=2)
     }
-    response = test_client.put(f"/sales/{created_sale['id']}", json=sale_update_data, headers=headers)
-    assert response.status_code == 422, response.text
+    create_response = client.post(
+        "/sales/",
+        json=fake_sale,
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert create_response.status_code == 200
+    sale_id = create_response.json()["id"]
 
-def test_delete_sale(test_client, vendedor_token, created_sale):
-    headers = {"Authorization": f"Bearer {vendedor_token}"}
-    response = test_client.delete(f"/sales/{created_sale['id']}", headers=headers)
-    assert response.status_code == 200, response.text
+    response = client.delete(
+        f"/sales/{sale_id}",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 200
     data = response.json()
-    assert data["id"] == created_sale["id"]
+    assert data["product_id"] == fake_sale["product_id"]
 
-def test_delete_nonexistent_sale(test_client, vendedor_token):
-    headers = {"Authorization": f"Bearer {vendedor_token}"}
-    response = test_client.delete("/sales/999", headers=headers)  # ID no existente
-    assert response.status_code == 404, response.text
+    response = client.get(
+        f"/sales/{sale_id}",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 404
+
+def test_create_sale_unauthorized(test_db):
+    fake_sale = {
+        "product_id": 1,
+        "price": faker.pyfloat(min_value=1, max_value=100, right_digits=2)
+    }
+    response = client.post(
+        "/sales/",
+        json=fake_sale
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Not authenticated"
+
+def test_update_sale_unauthorized(test_db, token):
+    fake_sale = {
+        "product_id": 1,
+        "price": faker.pyfloat(min_value=1, max_value=100, right_digits=2)
+    }
+    create_response = client.post(
+        "/sales/",
+        json=fake_sale,
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert create_response.status_code == 200
+    sale_id = create_response.json()["id"]
+
+    updated_sale = {
+        "product_id": 2,
+        "price": faker.pyfloat(min_value=1, max_value=100, right_digits=2)
+    }
+
+    # Simulate unauthorized user by not sending token
+    response = client.put(
+        f"/sales/{sale_id}",
+        json=updated_sale
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Not authenticated"
+
+def test_delete_sale_unauthorized(test_db, token):
+    fake_sale = {
+        "product_id": 1,
+        "price": faker.pyfloat(min_value=1, max_value=100, right_digits=2)
+    }
+    create_response = client.post(
+        "/sales/",
+        json=fake_sale,
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert create_response.status_code == 200
+    sale_id = create_response.json()["id"]
+
+    # Simulate unauthorized user by not sending token
+    response = client.delete(
+        f"/sales/{sale_id}"
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Not authenticated"

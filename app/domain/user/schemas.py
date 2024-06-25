@@ -21,9 +21,8 @@ class UserUpdate(UserBase):
 class User(UserBase):
     id: int
 
-    model_config = {
-        "from_attributes": True  # Actualización para Pydantic v2
-    }
+    class Config:
+        orm_mode = True
 
 class Token(BaseModel):
     access_token: str

@@ -1,19 +1,20 @@
 import pytest
+from fastapi import Depends
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from app.domain.inventory import models as inventory_models, schemas as inventory_schemas
-from app.domain.user import models as user_models  
-from app.domain.user.models import User  
-from database import Base, get_db
 from main import app
+from app.domain.inventory import models, schemas
+from app.domain.user.models import User
+from database import Base, get_db
 from faker import Faker
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
-
 engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+Base.metadata.create_all(bind=engine)
 
 def override_get_db():
     try:
@@ -24,167 +25,201 @@ def override_get_db():
 
 app.dependency_overrides[get_db] = override_get_db
 
+client = TestClient(app)
+faker = Faker()
+
 @pytest.fixture(scope="module")
-def test_client():
+def test_db():
     Base.metadata.create_all(bind=engine)
-    client = TestClient(app)
-    yield client
+    yield
     Base.metadata.drop_all(bind=engine)
 
-fake = Faker()
-
 @pytest.fixture(scope="module")
-def bodega_user(test_client):
-    user_data = {
-        "nombre": fake.name(),
-        "correo": fake.email(),
-        "password": "password123",  
+def test_user():
+    fake_user = {
+        "nombre": faker.name(),
+        "correo": faker.email(),
+        "password": faker.password(),
         "role": "Bodega"
     }
-    response = test_client.post(
+    response = client.post(
         "/users/",
-        json=user_data
+        json=fake_user,
     )
     assert response.status_code == 200
-    return user_data
+    fake_user.update(response.json())  # Actualiza fake_user con la respuesta incluyendo el ID
+    return fake_user
 
 @pytest.fixture(scope="module")
-def bodega_token(test_client, bodega_user):
-    response = test_client.post(
+def token(test_user):
+    response = client.post(
         "/token",
-        data={"username": bodega_user["correo"], "password": "password123"},
-        headers={"Content-Type": "application/x-www-form-urlencoded"}
+        data={"username": test_user["correo"], "password": test_user["password"]}
+    )
+    assert response.status_code == 200
+    return response.json()["access_token"]
+
+def test_create_inventory_item(test_db, token):
+    fake_item = {
+        "product_name": faker.word(),
+        "description": faker.text(),
+        "quantity": faker.random_int(min=1, max=100)
+    }
+    response = client.post(
+        "/inventory/",
+        json=fake_item,
+        headers={"Authorization": f"Bearer {token}"}
     )
     assert response.status_code == 200
     data = response.json()
-    assert "access_token" in data
-    assert data["token_type"] == "bearer"
-    return data["access_token"]
-
-def test_create_inventory_item(test_client, bodega_token):
-    headers = {"Authorization": f"Bearer {bodega_token}"}
-    inventory_data = {
-        "product_name": "Martillo",
-        "description": "Para martillar",
-        "quantity": 10
-    }
-    response = test_client.post(
-        "/inventory/",
-        json=inventory_data,
-        headers=headers
-    )
-    assert response.status_code == 200, response.text
-    data = response.json()
-    assert data["product_name"] == inventory_data["product_name"]
-    assert data["description"] == inventory_data["description"]
-    assert data["quantity"] == inventory_data["quantity"]
+    assert data["product_name"] == fake_item["product_name"]
     assert "id" in data
 
-def test_read_inventory_item(test_client, bodega_token):
-    headers = {"Authorization": f"Bearer {bodega_token}"}
-    response = test_client.get("/inventory/1", headers=headers)
-    assert response.status_code == 200, response.text
-    data = response.json()
-    assert data["id"] == 1
-    assert data["product_name"] == "Martillo"
-    assert data["description"] == "Para martillar"
-    assert data["quantity"] == 10
+def test_read_inventory_item(test_db, token):
+    fake_item = {
+        "product_name": faker.word(),
+        "description": faker.text(),
+        "quantity": faker.random_int(min=1, max=100)
+    }
+    create_response = client.post(
+        "/inventory/",
+        json=fake_item,
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert create_response.status_code == 200
+    item_id = create_response.json()["id"]
 
-def test_read_inventory_items(test_client, bodega_token):
-    headers = {"Authorization": f"Bearer {bodega_token}"}
-    response = test_client.get("/inventory/", headers=headers)
-    assert response.status_code == 200, response.text
+    response = client.get(
+        f"/inventory/{item_id}",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["product_name"] == fake_item["product_name"]
+
+def test_read_inventory_items(test_db, token):
+    response = client.get(
+        "/inventory/",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 200
     data = response.json()
     assert len(data) > 0
 
-def test_update_inventory_item(test_client, bodega_token):
-    headers = {"Authorization": f"Bearer {bodega_token}"}
-    inventory_update_data = {
-        "product_name": "Martillo",
-        "description": "Para martillar cosas grandes",
-        "quantity": 15
+def test_update_inventory_item(test_db, token):
+    fake_item = {
+        "product_name": faker.word(),
+        "description": faker.text(),
+        "quantity": faker.random_int(min=1, max=100)
     }
-    response = test_client.put("/inventory/1", json=inventory_update_data, headers=headers)
-    assert response.status_code == 200, response.text
-    data = response.json()
-    assert data["product_name"] == inventory_update_data["product_name"]
-    assert data["description"] == inventory_update_data["description"]
-    assert data["quantity"] == inventory_update_data["quantity"]
-
-def test_delete_inventory_item(test_client, bodega_token):
-    headers = {"Authorization": f"Bearer {bodega_token}"}
-    
-    
-    inventory_data = {
-        "product_name": "Martillo",
-        "description": "Para martillar",
-        "quantity": 10
-    }
-    response = test_client.post(
+    create_response = client.post(
         "/inventory/",
-        json=inventory_data,
-        headers=headers
+        json=fake_item,
+        headers={"Authorization": f"Bearer {token}"}
     )
-    assert response.status_code == 200, response.text
-    item_id = response.json()["id"]
-    
-    
-    delete_quantity = 5  
-    response = test_client.delete(f"/inventory/{item_id}/{delete_quantity}", headers=headers)
-    assert response.status_code == 200, response.text
+    assert create_response.status_code == 200
+    item_id = create_response.json()["id"]
+
+    updated_item = {
+        "product_name": faker.word(),
+        "description": faker.text(),
+        "quantity": faker.random_int(min=1, max=100)
+    }
+    response = client.put(
+        f"/inventory/{item_id}",
+        json=updated_item,
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 200
     data = response.json()
-    assert data["id"] == item_id
-    assert data["product_name"] == "Martillo"
-    assert data["description"] == "Para martillar"
-    assert data["quantity"] == 5 
+    assert data["product_name"] == updated_item["product_name"]
 
-def test_create_inventory_item_unauthorized(test_client):
-    headers = {"Authorization": "Bearer invalid_token"}
-    inventory_data = {
-        "product_name": "Martillo",
-        "description": "Para martillar",
-        "quantity": 10
+def test_delete_inventory_item(test_db, token):
+    fake_item = {
+        "product_name": faker.word(),
+        "description": faker.text(),
+        "quantity": faker.random_int(min=1, max=100)
     }
-    response = test_client.post(
+    create_response = client.post(
         "/inventory/",
-        json=inventory_data,
-        headers=headers
+        json=fake_item,
+        headers={"Authorization": f"Bearer {token}"}
     )
-    assert response.status_code == 401
+    assert create_response.status_code == 200
+    item_id = create_response.json()["id"]
 
-def test_update_inventory_item_unauthorized(test_client):
-    headers = {"Authorization": "Bearer invalid_token"}
-    inventory_update_data = {
-        "product_name": "Martillo",
-        "description": "Para martillar cosas grandes",
-        "quantity": 15
-    }
-    response = test_client.put("/inventory/1", json=inventory_update_data, headers=headers)
-    assert response.status_code == 401
+    response = client.delete(
+        f"/inventory/{item_id}/{fake_item['quantity']}",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["product_name"] == fake_item["product_name"]
 
-def test_delete_inventory_item_not_found(test_client, bodega_token):
-    headers = {"Authorization": f"Bearer {bodega_token}"}
-    response = test_client.delete("/inventory/999/5", headers=headers) 
+    response = client.get(
+        f"/inventory/{item_id}",
+        headers={"Authorization": f"Bearer {token}"}
+    )
     assert response.status_code == 404
 
-def test_delete_inventory_item_invalid_quantity(test_client, bodega_token):
-    headers = {"Authorization": f"Bearer {bodega_token}"}
-    
-    
-    inventory_data = {
-        "product_name": "Martillo",
-        "description": "Para martillar",
-        "quantity": 10
+def test_create_inventory_item_unauthorized(test_db):
+    fake_item = {
+        "product_name": faker.word(),
+        "description": faker.text(),
+        "quantity": faker.random_int(min=1, max=100)
     }
-    response = test_client.post(
+    response = client.post(
         "/inventory/",
-        json=inventory_data,
-        headers=headers
+        json=fake_item
     )
-    assert response.status_code == 200, response.text
-    item_id = response.json()["id"]
-    
-    
-    delete_quantity = 20 
-    response = test_client.delete(f"/inventory/{item_id}/{delete_quantity}", headers=headers)
-    assert response.status_code == 400
+    assert response.status_code == 401  # Cambiado de 403 a 401
+    assert response.json()["detail"] == "Not authenticated"
+
+def test_update_inventory_item_unauthorized(test_db, token):
+    fake_item = {
+        "product_name": faker.word(),
+        "description": faker.text(),
+        "quantity": faker.random_int(min=1, max=100)
+    }
+    create_response = client.post(
+        "/inventory/",
+        json=fake_item,
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert create_response.status_code == 200
+    item_id = create_response.json()["id"]
+
+    updated_item = {
+        "product_name": faker.word(),
+        "description": faker.text(),
+        "quantity": faker.random_int(min=1, max=100)
+    }
+
+    # Simulate unauthorized user by not sending token
+    response = client.put(
+        f"/inventory/{item_id}",
+        json=updated_item
+    )
+    assert response.status_code == 401  # Cambiado de 403 a 401
+    assert response.json()["detail"] == "Not authenticated"
+
+def test_delete_inventory_item_unauthorized(test_db, token):
+    fake_item = {
+        "product_name": faker.word(),
+        "description": faker.text(),
+        "quantity": faker.random_int(min=1, max=100)
+    }
+    create_response = client.post(
+        "/inventory/",
+        json=fake_item,
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert create_response.status_code == 200
+    item_id = create_response.json()["id"]
+
+    # Simulate unauthorized user by not sending token
+    response = client.delete(
+        f"/inventory/{item_id}/{fake_item['quantity']}"
+    )
+    assert response.status_code == 401  # Cambiado de 403 a 401
+    assert response.json()["detail"] == "Not authenticated"

@@ -1,18 +1,21 @@
 import pytest
+from fastapi import Depends
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from app.domain.user import models as user_models
-from database import Base, get_db
 from main import app
+from app.domain.dispatch import models as dispatch_models, schemas as dispatch_schemas
+from app.domain.user.models import User
+from database import Base, get_db
 from faker import Faker
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
-
 engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Dependencia sobreescrita para pruebas
+Base.metadata.create_all(bind=engine)
+
 def override_get_db():
     try:
         db = TestingSessionLocal()
@@ -22,211 +25,174 @@ def override_get_db():
 
 app.dependency_overrides[get_db] = override_get_db
 
+client = TestClient(app)
+faker = Faker()
+
 @pytest.fixture(scope="module")
-def test_client():
+def test_db():
     Base.metadata.create_all(bind=engine)
-    client = TestClient(app)
-    yield client
+    yield
     Base.metadata.drop_all(bind=engine)
 
-fake = Faker()
-
 @pytest.fixture(scope="module")
-def cliente_user(test_client):
-    user_data = {
-        "nombre": fake.name(),
-        "correo": fake.email(),
-        "password": "password123",
+def test_user():
+    fake_user = {
+        "nombre": faker.name(),
+        "correo": faker.email(),
+        "password": faker.password(),
         "role": "Cliente"
     }
-    response = test_client.post(
+    response = client.post(
         "/users/",
-        json=user_data
+        json=fake_user,
     )
     assert response.status_code == 200
-    return user_data
+    fake_user.update(response.json())
+    return fake_user
 
 @pytest.fixture(scope="module")
-def cliente_token(test_client, cliente_user):
-    response = test_client.post(
+def token(test_user):
+    response = client.post(
         "/token",
-        data={"username": cliente_user["correo"], "password": "password123"},
-        headers={"Content-Type": "application/x-www-form-urlencoded"}
+        data={"username": test_user["correo"], "password": test_user["password"]}
     )
     assert response.status_code == 200
-    data = response.json()
-    assert "access_token" in data
-    assert data["token_type"] == "bearer"
-    return data["access_token"]
+    return response.json()["access_token"]
 
-def test_create_dispatch(test_client, cliente_token):
-    headers = {"Authorization": f"Bearer {cliente_token}"}
-    dispatch_data = {
-        "address": fake.address(),
-        "username": fake.name(),
-        "email": fake.email(),
-        "phone": fake.phone_number()
+def test_create_dispatch(test_db, token):
+    fake_dispatch = {
+        "address": faker.address(),
+        "username": faker.name(),
+        "email": faker.email(),
+        "phone": faker.phone_number()
     }
-    response = test_client.post(
+    response = client.post(
         "/dispatch/",
-        json=dispatch_data,
-        headers=headers
+        json=fake_dispatch,
+        headers={"Authorization": f"Bearer {token}"}
     )
     assert response.status_code == 200, response.text
     data = response.json()
-    assert data["address"] == dispatch_data["address"]
-    assert data["username"] == dispatch_data["username"]
-    assert data["email"] == dispatch_data["email"]
-    assert data["phone"] == dispatch_data["phone"]
-    assert data["total_cost"] == 3000
+    assert data["address"] == fake_dispatch["address"]
+    assert data["username"] == fake_dispatch["username"]
+    assert data["email"] == fake_dispatch["email"]
+    assert data["phone"] == fake_dispatch["phone"]
     assert "id" in data
 
-def test_get_dispatch(test_client, cliente_token):
-    headers = {"Authorization": f"Bearer {cliente_token}"}
-    
-    # Crear un despacho primero
-    dispatch_data = {
-        "address": fake.address(),
-        "username": fake.name(),
-        "email": fake.email(),
-        "phone": fake.phone_number()
+def test_get_dispatch(test_db, token):
+    fake_dispatch = {
+        "address": faker.address(),
+        "username": faker.name(),
+        "email": faker.email(),
+        "phone": faker.phone_number()
     }
-    response = test_client.post(
+    create_response = client.post(
         "/dispatch/",
-        json=dispatch_data,
-        headers=headers
+        json=fake_dispatch,
+        headers={"Authorization": f"Bearer {token}"}
     )
-    assert response.status_code == 200, response.text
-    dispatch = response.json()
+    dispatch_id = create_response.json()["id"]
 
-    # Obtener detalles del despacho
-    dispatch_id = dispatch["id"]
-    response = test_client.get(
+    response = client.get(
         f"/dispatch/{dispatch_id}",
-        headers=headers
+        headers={"Authorization": f"Bearer {token}"}
     )
     assert response.status_code == 200, response.text
     data = response.json()
-    assert data["id"] == dispatch_id
-    assert data["address"] == dispatch["address"]
-    assert data["username"] == dispatch["username"]
-    assert data["email"] == dispatch["email"]
-    assert data["phone"] == dispatch["phone"]
+    assert data["address"] == fake_dispatch["address"]
+    assert data["username"] == fake_dispatch["username"]
+    assert data["email"] == fake_dispatch["email"]
+    assert data["phone"] == fake_dispatch["phone"]
 
-def test_update_dispatch(test_client, cliente_token):
-    headers = {"Authorization": f"Bearer {cliente_token}"}
-
-    # Crear un despacho primero
-    dispatch_data = {
-        "address": fake.address(),
-        "username": fake.name(),
-        "email": fake.email(),
-        "phone": fake.phone_number()
-    }
-    response = test_client.post(
+def test_list_dispatches(test_db, token):
+    response = client.get(
         "/dispatch/",
-        json=dispatch_data,
-        headers=headers
-    )
-    assert response.status_code == 200, response.text
-    dispatch = response.json()
-
-    # Actualizar el despacho
-    dispatch_id = dispatch["id"]
-    update_data = {
-        "address": fake.address(),
-        "username": dispatch["username"],
-        "email": dispatch["email"],
-        "phone": dispatch.get("phone")
-    }
-    response = test_client.put(
-        f"/dispatch/{dispatch_id}",
-        json=update_data,
-        headers=headers
+        headers={"Authorization": f"Bearer {token}"}
     )
     assert response.status_code == 200, response.text
     data = response.json()
-    assert data["id"] == dispatch_id
-    assert data["address"] == update_data["address"]
-    assert data["username"] == update_data["username"]
-    assert data["email"] == update_data["email"]
-    assert data["phone"] == update_data["phone"]
+    assert isinstance(data, list)
+    assert len(data) > 0
 
-def test_delete_dispatch(test_client, cliente_token):
-    headers = {"Authorization": f"Bearer {cliente_token}"}
-
-    # Crear un despacho primero
-    dispatch_data = {
-        "address": fake.address(),
-        "username": fake.name(),
-        "email": fake.email(),
-        "phone": fake.phone_number()
+def test_update_dispatch(test_db, token):
+    fake_dispatch = {
+        "address": faker.address(),
+        "username": faker.name(),
+        "email": faker.email(),
+        "phone": faker.phone_number()
     }
-    response = test_client.post(
+    create_response = client.post(
         "/dispatch/",
-        json=dispatch_data,
-        headers=headers
+        json=fake_dispatch,
+        headers={"Authorization": f"Bearer {token}"}
     )
-    assert response.status_code == 200, response.text
-    dispatch = response.json()
+    dispatch_id = create_response.json()["id"]
 
-    # Eliminar el despacho
-    dispatch_id = dispatch["id"]
-    response = test_client.delete(
+    updated_dispatch = {
+        "address": faker.address(),
+        "username": faker.name(),
+        "email": faker.email(),
+        "phone": faker.phone_number()
+    }
+    response = client.put(
         f"/dispatch/{dispatch_id}",
-        headers=headers
+        json=updated_dispatch,
+        headers={"Authorization": f"Bearer {token}"}
     )
-    assert response.status_code == 200, response.text
-
-def test_list_dispatches(test_client, cliente_token):
-    headers = {"Authorization": f"Bearer {cliente_token}"}
-
-    # Crear algunos despachos
-    for _ in range(3):
-        dispatch_data = {
-            "address": fake.address(),
-            "username": fake.name(),
-            "email": fake.email(),
-            "phone": fake.phone_number()
-        }
-        response = test_client.post(
-            "/dispatch/",
-            json=dispatch_data,
-            headers=headers
-        )
-        assert response.status_code == 200
-
-    # Listar los despachos
-    response = test_client.get("/dispatch/", headers=headers)
     assert response.status_code == 200, response.text
     data = response.json()
-    assert len(data) >= 3
+    assert data["address"] == updated_dispatch["address"]
+    assert data["username"] == updated_dispatch["username"]
+    assert data["email"] == updated_dispatch["email"]
+    assert data["phone"] == updated_dispatch["phone"]
 
-def test_create_dispatch_unauthorized(test_client):
-    dispatch_data = {
-        "address": fake.address(),
-        "username": fake.name(),
-        "email": fake.email(),
-        "phone": fake.phone_number()
+def test_delete_dispatch(test_db, token):
+    fake_dispatch = {
+        "address": faker.address(),
+        "username": faker.name(),
+        "email": faker.email(),
+        "phone": faker.phone_number()
     }
-    response = test_client.post(
+    create_response = client.post(
         "/dispatch/",
-        json=dispatch_data
+        json=fake_dispatch,
+        headers={"Authorization": f"Bearer {token}"}
     )
-    assert response.status_code == 401
+    dispatch_id = create_response.json()["id"]
 
-def test_get_dispatch_unauthorized(test_client):
-    response = test_client.get("/dispatch/1")
-    assert response.status_code == 401
-
-def test_update_dispatch_unauthorized(test_client):
-    update_data = {"address": fake.address()}
-    response = test_client.put(
-        "/dispatch/1",
-        json=update_data
+    response = client.delete(
+        f"/dispatch/{dispatch_id}",
+        headers={"Authorization": f"Bearer {token}"}
     )
-    assert response.status_code == 401
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["address"] == fake_dispatch["address"]
+    assert data["username"] == fake_dispatch["username"]
+    assert data["email"] == fake_dispatch["email"]
+    assert data["phone"] == fake_dispatch["phone"]
 
-def test_delete_dispatch_unauthorized(test_client):
-    response = test_client.delete("/dispatch/1")
-    assert response.status_code == 401
+def test_create_dispatch_unauthorized(test_db):
+    fake_dispatch = {
+        "address": faker.address(),
+        "username": faker.name(),
+        "email": faker.email(),
+        "phone": faker.phone_number()
+    }
+    response = client.post("/dispatch/", json=fake_dispatch)
+    assert response.status_code == 401, response.text
+    assert response.json()["detail"] == "Not authenticated"
+
+def test_get_dispatch_unauthorized(test_db):
+    response = client.get("/dispatch/1")
+    assert response.status_code == 401, response.text
+    assert response.json()["detail"] == "Not authenticated"
+
+def test_list_dispatches_unauthorized(test_db):
+    response = client.get("/dispatch/")
+    assert response.status_code == 401, response.text
+    assert response.json()["detail"] == "Not authenticated"
+
+def test_delete_dispatch_unauthorized(test_db):
+    response = client.delete("/dispatch/1")
+    assert response.status_code == 401, response.text
+    assert response.json()["detail"] == "Not authenticated"

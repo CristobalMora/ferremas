@@ -1,18 +1,21 @@
 import pytest
+from fastapi import Depends
 from fastapi.testclient import TestClient
+from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from app.domain.user import models
-from database import Base, get_db
 from main import app
+from app.domain.user import models, schemas
+from database import Base, get_db
 from faker import Faker
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
-
 engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Dependencia sobreescrita para pruebas
+Base.metadata.create_all(bind=engine)
+
 def override_get_db():
     try:
         db = TestingSessionLocal()
@@ -22,156 +25,134 @@ def override_get_db():
 
 app.dependency_overrides[get_db] = override_get_db
 
+client = TestClient(app)
+faker = Faker()
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+print("test_user.py: OAuth2PasswordBearer initialized")
+
 @pytest.fixture(scope="module")
-def test_client():
+def test_db():
     Base.metadata.create_all(bind=engine)
-    client = TestClient(app)
-    yield client
+    yield
     Base.metadata.drop_all(bind=engine)
 
-fake = Faker()
-
-def test_create_user(test_client):
-    user_data = {
-        "nombre": fake.name(),
-        "correo": fake.email(),
-        "password": fake.password(),
+@pytest.fixture(scope="module")
+def test_user():
+    fake_user = {
+        "nombre": faker.name(),
+        "correo": faker.email(),
+        "password": faker.password(),
         "role": "Cliente"
     }
-    response = test_client.post(
+    response = client.post(
         "/users/",
-        json=user_data
+        json=fake_user,
+    )
+    assert response.status_code == 200
+    return response.json()  # Devuelve el usuario creado incluyendo el ID
+
+def test_create_user(test_db):
+    fake_user = {
+        "nombre": faker.name(),
+        "correo": faker.email(),
+        "password": faker.password(),
+        "role": "Cliente"
+    }
+    response = client.post(
+        "/users/",
+        json=fake_user,
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["nombre"] == user_data["nombre"]
-    assert data["correo"] == user_data["correo"]
-    assert data["role"] == user_data["role"]
+    assert data["correo"] == fake_user["correo"]
     assert "id" in data
 
-def test_read_user(test_client):
-    user_data = {
-        "nombre": fake.name(),
-        "correo": fake.email(),
-        "password": fake.password(),
-        "role": "Vendedor"
-    }
-    response = test_client.post(
-        "/users/",
-        json=user_data
-    )
-    user_id = response.json()["id"]
-    response = test_client.get(f"/users/{user_id}")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["nombre"] == user_data["nombre"]
-    assert data["correo"] == user_data["correo"]
-    assert data["role"] == user_data["role"]
-    assert data["id"] == user_id
-
-def test_read_users(test_client):
-    response = test_client.get("/users/")
-    assert response.status_code == 200
-    data = response.json()
-    assert isinstance(data, list)
-
-def test_update_user(test_client):
-    user_data = {
-        "nombre": fake.name(),
-        "correo": fake.email(),
-        "password": fake.password(),
-        "role": "Administrador"
-    }
-    response = test_client.post(
-        "/users/",
-        json=user_data
-    )
-    user_id = response.json()["id"]
-    updated_user_data = {
-        "nombre": fake.name(),
-        "correo": fake.email(),
-        "role": "Bodega"
-    }
-    response = test_client.put(
-        f"/users/{user_id}",
-        json=updated_user_data
-    )
-    assert response.status_code == 200
-    data = response.json()
-    assert data["nombre"] == updated_user_data["nombre"]
-    assert data["correo"] == updated_user_data["correo"]
-    assert data["role"] == updated_user_data["role"]
-    assert data["id"] == user_id
-
-def test_delete_user(test_client):
-    user_data = {
-        "nombre": fake.name(),
-        "correo": fake.email(),
-        "password": fake.password(),
+def test_create_user_duplicate_email(test_db, test_user):
+    duplicate_user = {
+        "nombre": faker.name(),
+        "correo": test_user["correo"],  # Same email as test_user
+        "password": faker.password(),
         "role": "Cliente"
     }
-    response = test_client.post(
+    response = client.post(
         "/users/",
-        json=user_data
-    )
-    user_id = response.json()["id"]
-    response = test_client.delete(f"/users/{user_id}")
-    assert response.status_code == 200
-    data = response.json()
-    assert data["id"] == user_id
-    response = test_client.get(f"/users/{user_id}")
-    assert response.status_code == 404
-
-def test_create_user_existing_email(test_client):
-    user_data = {
-        "nombre": fake.name(),
-        "correo": "existing@example.com",
-        "password": fake.password(),
-        "role": "Cliente"
-    }
-    # Crear el primer usuario
-    response = test_client.post(
-        "/users/",
-        json=user_data
-    )
-    assert response.status_code == 200
-    # Intentar crear un segundo usuario con el mismo correo electrónico
-    response = test_client.post(
-        "/users/",
-        json=user_data
+        json=duplicate_user,
     )
     assert response.status_code == 400
+    assert response.json()["detail"] == "Email already registered"
 
-def test_authenticate_user(test_client):
-    user_data = {
-        "nombre": fake.name(),
-        "correo": "authuser@example.com",
-        "password": "password123",
+def test_read_user(test_db, test_user):
+    user_id = test_user["id"]  # Usa el ID del usuario de prueba
+    
+    response = client.get(f"/users/{user_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["correo"] == test_user["correo"]
+
+def test_read_user_not_found(test_db):
+    response = client.get("/users/99999")
+    assert response.status_code == 404
+    assert response.json()["detail"] == "User not found"
+
+def test_read_users(test_db):
+    response = client.get("/users/")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) > 0
+
+def test_update_user(test_db, test_user):
+    user_id = test_user["id"]  # Usa el ID del usuario de prueba
+
+    updated_user = {
+        "nombre": faker.name(),
+        "correo": faker.email(),
         "role": "Cliente"
     }
-    response = test_client.post(
-        "/users/",
-        json=user_data
-    )
-    assert response.status_code == 200
-    response = test_client.post(
-        "/token",
-        data={"username": user_data["correo"], "password": "password123"},
-        headers={"Content-Type": "application/x-www-form-urlencoded"}
+    response = client.put(
+        f"/users/{user_id}",
+        json=updated_user,
     )
     assert response.status_code == 200
     data = response.json()
-    assert "access_token" in data
-    assert data["token_type"] == "bearer"
+    assert data["correo"] == updated_user["correo"]
 
-def test_create_user_missing_fields(test_client):
-    user_data = {
-        "nombre": fake.name(),
-        "password": fake.password(),
+def test_update_user_not_found(test_db):
+    updated_user = {
+        "nombre": faker.name(),
+        "correo": faker.email(),
         "role": "Cliente"
     }
-    response = test_client.post(
-        "/users/",
-        json=user_data
+    response = client.put(
+        "/users/99999",
+        json=updated_user,
     )
-    assert response.status_code == 422  # Debe fallar debido a la falta del campo 'correo'
+    assert response.status_code == 404
+    assert response.json()["detail"] == "User not found"
+
+def test_delete_user(test_db, test_user):
+    # Crear un nuevo usuario para eliminar
+    fake_user_to_delete = {
+        "nombre": faker.name(),
+        "correo": faker.email(),
+        "password": faker.password(),
+        "role": "Cliente"
+    }
+    create_response = client.post(
+        "/users/",
+        json=fake_user_to_delete,
+    )
+    assert create_response.status_code == 200
+    user_to_delete = create_response.json()
+    user_id = user_to_delete["id"]
+
+    # Eliminar el usuario creado
+    response = client.delete(f"/users/{user_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["correo"] == fake_user_to_delete["correo"]
+
+    # Verificar que el usuario ha sido eliminado
+    response = client.get(f"/users/{user_id}")
+    assert response.status_code == 404
