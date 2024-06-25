@@ -121,3 +121,57 @@ def test_delete_user(test_client):
     assert data["id"] == user_id
     response = test_client.get(f"/users/{user_id}")
     assert response.status_code == 404
+
+def test_create_user_existing_email(test_client):
+    user_data = {
+        "nombre": fake.name(),
+        "correo": "existing@example.com",
+        "password": fake.password(),
+        "role": "Cliente"
+    }
+    # Crear el primer usuario
+    response = test_client.post(
+        "/users/",
+        json=user_data
+    )
+    assert response.status_code == 200
+    # Intentar crear un segundo usuario con el mismo correo electrónico
+    response = test_client.post(
+        "/users/",
+        json=user_data
+    )
+    assert response.status_code == 400
+
+def test_authenticate_user(test_client):
+    user_data = {
+        "nombre": fake.name(),
+        "correo": "authuser@example.com",
+        "password": "password123",
+        "role": "Cliente"
+    }
+    response = test_client.post(
+        "/users/",
+        json=user_data
+    )
+    assert response.status_code == 200
+    response = test_client.post(
+        "/token",
+        data={"username": user_data["correo"], "password": "password123"},
+        headers={"Content-Type": "application/x-www-form-urlencoded"}
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert "access_token" in data
+    assert data["token_type"] == "bearer"
+
+def test_create_user_missing_fields(test_client):
+    user_data = {
+        "nombre": fake.name(),
+        "password": fake.password(),
+        "role": "Cliente"
+    }
+    response = test_client.post(
+        "/users/",
+        json=user_data
+    )
+    assert response.status_code == 422  # Debe fallar debido a la falta del campo 'correo'

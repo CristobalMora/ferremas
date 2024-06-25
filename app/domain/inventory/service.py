@@ -26,10 +26,23 @@ def update_inventory_item(db: Session, item_id: int, item_update: schemas.Invent
         raise HTTPException(status_code=404, detail="Inventory item not found")
     return repository.update_inventory_item(db, db_item, item_update)
 
-def delete_inventory_item(db: Session, item_id: int, current_user: User):
+def delete_inventory_item(db: Session, item_id: int, quantity: int, current_user: User):
     if current_user.role != "Bodega":
         raise HTTPException(status_code=403, detail="Not authorized to delete inventory items")
+    
     db_item = repository.get_inventory_item(db, item_id)
     if not db_item:
         raise HTTPException(status_code=404, detail="Inventory item not found")
-    repository.delete_inventory_item(db, db_item)
+    
+    if db_item.quantity < quantity:
+        raise HTTPException(status_code=400, detail="Cannot delete more items than are available in inventory")
+    
+    db_item.quantity -= quantity
+    
+    if db_item.quantity == 0:
+        repository.delete_inventory_item(db, db_item)
+    else:
+        db.commit()
+        db.refresh(db_item)
+    
+    return db_item

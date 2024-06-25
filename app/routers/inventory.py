@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from app.domain.inventory import models, schemas, service
 from app.domain.user.service import get_current_user
 from database import get_db
+from app.domain.user.models import User  # Asegúrate de importar la clase User
 
 router = APIRouter()
 
@@ -10,7 +11,7 @@ router = APIRouter()
 def create_inventory_item(
     item: schemas.InventoryCreate, 
     db: Session = Depends(get_db), 
-    current_user = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     if current_user.role != "Bodega":
         raise HTTPException(
@@ -32,7 +33,7 @@ def update_inventory_item(
     item_id: int, 
     item_update: schemas.InventoryCreate, 
     db: Session = Depends(get_db), 
-    current_user = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     if current_user.role != "Bodega":
         raise HTTPException(
@@ -41,15 +42,16 @@ def update_inventory_item(
         )
     return service.update_inventory_item(db, item_id, item_update, current_user)
 
-@router.delete("/{item_id}", response_model=schemas.Inventory)
+@router.delete("/{item_id}/{quantity}", response_model=schemas.Inventory)
 def delete_inventory_item(
     item_id: int, 
+    quantity: int, 
     db: Session = Depends(get_db), 
-    current_user = Depends(get_current_user)
+    current_user: User = Depends(get_current_user)
 ):
     if current_user.role != "Bodega":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, 
             detail="Not authorized to delete inventory items"
         )
-    return service.delete_inventory_item(db, item_id, current_user)
+    return service.delete_inventory_item(db, item_id, quantity, current_user)

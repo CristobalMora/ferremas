@@ -6,7 +6,7 @@ class Sale(Base):
     __tablename__ = "sales"
 
     id = Column(Integer, primary_key=True, index=True)
-    product_id = Column(Integer, ForeignKey("inventory.id"))
+    product_id = Column(Integer, ForeignKey("inventory.id"), nullable=False)
     price = Column(Float, nullable=False)
 
     product = relationship("Inventory", back_populates="sale")

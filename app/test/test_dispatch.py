@@ -80,3 +80,153 @@ def test_create_dispatch(test_client, cliente_token):
     assert data["phone"] == dispatch_data["phone"]
     assert data["total_cost"] == 3000
     assert "id" in data
+
+def test_get_dispatch(test_client, cliente_token):
+    headers = {"Authorization": f"Bearer {cliente_token}"}
+    
+    # Crear un despacho primero
+    dispatch_data = {
+        "address": fake.address(),
+        "username": fake.name(),
+        "email": fake.email(),
+        "phone": fake.phone_number()
+    }
+    response = test_client.post(
+        "/dispatch/",
+        json=dispatch_data,
+        headers=headers
+    )
+    assert response.status_code == 200, response.text
+    dispatch = response.json()
+
+    # Obtener detalles del despacho
+    dispatch_id = dispatch["id"]
+    response = test_client.get(
+        f"/dispatch/{dispatch_id}",
+        headers=headers
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["id"] == dispatch_id
+    assert data["address"] == dispatch["address"]
+    assert data["username"] == dispatch["username"]
+    assert data["email"] == dispatch["email"]
+    assert data["phone"] == dispatch["phone"]
+
+def test_update_dispatch(test_client, cliente_token):
+    headers = {"Authorization": f"Bearer {cliente_token}"}
+
+    # Crear un despacho primero
+    dispatch_data = {
+        "address": fake.address(),
+        "username": fake.name(),
+        "email": fake.email(),
+        "phone": fake.phone_number()
+    }
+    response = test_client.post(
+        "/dispatch/",
+        json=dispatch_data,
+        headers=headers
+    )
+    assert response.status_code == 200, response.text
+    dispatch = response.json()
+
+    # Actualizar el despacho
+    dispatch_id = dispatch["id"]
+    update_data = {
+        "address": fake.address(),
+        "username": dispatch["username"],
+        "email": dispatch["email"],
+        "phone": dispatch.get("phone")
+    }
+    response = test_client.put(
+        f"/dispatch/{dispatch_id}",
+        json=update_data,
+        headers=headers
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["id"] == dispatch_id
+    assert data["address"] == update_data["address"]
+    assert data["username"] == update_data["username"]
+    assert data["email"] == update_data["email"]
+    assert data["phone"] == update_data["phone"]
+
+def test_delete_dispatch(test_client, cliente_token):
+    headers = {"Authorization": f"Bearer {cliente_token}"}
+
+    # Crear un despacho primero
+    dispatch_data = {
+        "address": fake.address(),
+        "username": fake.name(),
+        "email": fake.email(),
+        "phone": fake.phone_number()
+    }
+    response = test_client.post(
+        "/dispatch/",
+        json=dispatch_data,
+        headers=headers
+    )
+    assert response.status_code == 200, response.text
+    dispatch = response.json()
+
+    # Eliminar el despacho
+    dispatch_id = dispatch["id"]
+    response = test_client.delete(
+        f"/dispatch/{dispatch_id}",
+        headers=headers
+    )
+    assert response.status_code == 200, response.text
+
+def test_list_dispatches(test_client, cliente_token):
+    headers = {"Authorization": f"Bearer {cliente_token}"}
+
+    # Crear algunos despachos
+    for _ in range(3):
+        dispatch_data = {
+            "address": fake.address(),
+            "username": fake.name(),
+            "email": fake.email(),
+            "phone": fake.phone_number()
+        }
+        response = test_client.post(
+            "/dispatch/",
+            json=dispatch_data,
+            headers=headers
+        )
+        assert response.status_code == 200
+
+    # Listar los despachos
+    response = test_client.get("/dispatch/", headers=headers)
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert len(data) >= 3
+
+def test_create_dispatch_unauthorized(test_client):
+    dispatch_data = {
+        "address": fake.address(),
+        "username": fake.name(),
+        "email": fake.email(),
+        "phone": fake.phone_number()
+    }
+    response = test_client.post(
+        "/dispatch/",
+        json=dispatch_data
+    )
+    assert response.status_code == 401
+
+def test_get_dispatch_unauthorized(test_client):
+    response = test_client.get("/dispatch/1")
+    assert response.status_code == 401
+
+def test_update_dispatch_unauthorized(test_client):
+    update_data = {"address": fake.address()}
+    response = test_client.put(
+        "/dispatch/1",
+        json=update_data
+    )
+    assert response.status_code == 401
+
+def test_delete_dispatch_unauthorized(test_client):
+    response = test_client.delete("/dispatch/1")
+    assert response.status_code == 401

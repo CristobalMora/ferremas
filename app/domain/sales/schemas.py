@@ -1,8 +1,8 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 class SaleBase(BaseModel):
     product_id: int
-    price: float
+    price: float = Field(gt=0, description="The price must be greater than zero.")
 
 class SaleCreate(SaleBase):
     pass

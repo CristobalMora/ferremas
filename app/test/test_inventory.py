@@ -3,7 +3,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from app.domain.inventory import models as inventory_models, schemas as inventory_schemas
-from app.domain.user import models as user_models
+from app.domain.user import models as user_models  
+from app.domain.user.models import User  
 from database import Base, get_db
 from main import app
 from faker import Faker
@@ -13,7 +14,7 @@ SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
 engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Dependencia sobreescrita para pruebas
+
 def override_get_db():
     try:
         db = TestingSessionLocal()
@@ -37,7 +38,7 @@ def bodega_user(test_client):
     user_data = {
         "nombre": fake.name(),
         "correo": fake.email(),
-        "password": "password123",  # Usamos una contraseña fija para facilitar la autenticación
+        "password": "password123",  
         "role": "Bodega"
     }
     response = test_client.post(
@@ -112,10 +113,78 @@ def test_update_inventory_item(test_client, bodega_token):
 
 def test_delete_inventory_item(test_client, bodega_token):
     headers = {"Authorization": f"Bearer {bodega_token}"}
-    response = test_client.delete("/inventory/1", headers=headers)
+    
+    
+    inventory_data = {
+        "product_name": "Martillo",
+        "description": "Para martillar",
+        "quantity": 10
+    }
+    response = test_client.post(
+        "/inventory/",
+        json=inventory_data,
+        headers=headers
+    )
+    assert response.status_code == 200, response.text
+    item_id = response.json()["id"]
+    
+    
+    delete_quantity = 5  
+    response = test_client.delete(f"/inventory/{item_id}/{delete_quantity}", headers=headers)
     assert response.status_code == 200, response.text
     data = response.json()
-    assert data["id"] == 1
+    assert data["id"] == item_id
     assert data["product_name"] == "Martillo"
     assert data["description"] == "Para martillar"
-    assert data["quantity"] == 15
+    assert data["quantity"] == 5 
+
+def test_create_inventory_item_unauthorized(test_client):
+    headers = {"Authorization": "Bearer invalid_token"}
+    inventory_data = {
+        "product_name": "Martillo",
+        "description": "Para martillar",
+        "quantity": 10
+    }
+    response = test_client.post(
+        "/inventory/",
+        json=inventory_data,
+        headers=headers
+    )
+    assert response.status_code == 401
+
+def test_update_inventory_item_unauthorized(test_client):
+    headers = {"Authorization": "Bearer invalid_token"}
+    inventory_update_data = {
+        "product_name": "Martillo",
+        "description": "Para martillar cosas grandes",
+        "quantity": 15
+    }
+    response = test_client.put("/inventory/1", json=inventory_update_data, headers=headers)
+    assert response.status_code == 401
+
+def test_delete_inventory_item_not_found(test_client, bodega_token):
+    headers = {"Authorization": f"Bearer {bodega_token}"}
+    response = test_client.delete("/inventory/999/5", headers=headers) 
+    assert response.status_code == 404
+
+def test_delete_inventory_item_invalid_quantity(test_client, bodega_token):
+    headers = {"Authorization": f"Bearer {bodega_token}"}
+    
+    
+    inventory_data = {
+        "product_name": "Martillo",
+        "description": "Para martillar",
+        "quantity": 10
+    }
+    response = test_client.post(
+        "/inventory/",
+        json=inventory_data,
+        headers=headers
+    )
+    assert response.status_code == 200, response.text
+    item_id = response.json()["id"]
+    
+    
+    delete_quantity = 20 
+    response = test_client.delete(f"/inventory/{item_id}/{delete_quantity}", headers=headers)
+    assert response.status_code == 400
