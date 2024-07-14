@@ -73,3 +73,22 @@ def test_delete_sucursal_service_not_authorized():
         service.delete_sucursal(db, sucursal_id, current_user)
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail == "Operation not permitted"
+
+def test_get_sucursal_service():
+    db = MagicMock(spec=Session)
+    sucursal_id = 1
+    db_sucursal = models.Sucursal(id=sucursal_id, nombre="Sucursal Test", direccion="Dirección Test", telefono="123456789")
+
+    with patch.object(repository, 'get_sucursal', return_value=db_sucursal):
+        result = service.get_sucursal(db, sucursal_id)
+        assert result == db_sucursal
+
+def test_get_sucursal_service_not_found():
+    db = MagicMock(spec=Session)
+    sucursal_id = 1
+
+    with patch.object(repository, 'get_sucursal', return_value=None):
+        with pytest.raises(HTTPException) as exc_info:
+            service.get_sucursal(db, sucursal_id)
+        assert exc_info.value.status_code == 404
+        assert exc_info.value.detail == "Sucursal not found"

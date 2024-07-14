@@ -14,7 +14,10 @@ def create_sucursal(db: Session, sucursal: schemas.SucursalCreate, current_user:
     return repository.create_sucursal(db, sucursal)
 
 def get_sucursal(db: Session, sucursal_id: int):
-    return repository.get_sucursal(db, sucursal_id)
+    db_sucursal = repository.get_sucursal(db, sucursal_id)
+    if db_sucursal is None:
+        raise HTTPException(status_code=404, detail="Sucursal not found")
+    return db_sucursal
 
 def get_sucursales(db: Session, skip: int = 0, limit: int = 10):
     return repository.get_sucursales(db, skip, limit)
