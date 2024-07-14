@@ -106,7 +106,7 @@ def test_access_protected_route_with_invalid_token(test_db):
     assert response.json()["detail"] == "Could not validate credentials"
 
 def test_access_protected_route_with_expired_token(test_db, test_user):
-    # Create an expired token
+    
     expired_token = jwt.encode({
         "sub": test_user["correo"],
         "exp": datetime.now(timezone.utc) - timedelta(minutes=1)
@@ -120,7 +120,7 @@ def test_access_protected_route_with_expired_token(test_db, test_user):
     assert response.json()["detail"] == "Could not validate credentials"
 
 def test_access_protected_route_with_manipulated_token(test_db, test_user):
-    # Create a valid token and manipulate it
+    
     valid_token = jwt.encode({
         "sub": test_user["correo"],
         "exp": datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)

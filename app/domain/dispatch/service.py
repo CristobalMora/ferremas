@@ -1,18 +1,38 @@
 from sqlalchemy.orm import Session
-from . import repository, schemas
+from . import models, schemas
+from fastapi import HTTPException
 
 def create_dispatch(db: Session, dispatch: schemas.DispatchCreate, user_id: int):
-    total_cost = 3000  # Coste extra fijo
-    return repository.create_dispatch(db, dispatch, user_id, total_cost)
+    db_dispatch = models.Dispatch(**dispatch.dict(), user_id=user_id, total_cost=3000)
+    db.add(db_dispatch)
+    db.commit()
+    db.refresh(db_dispatch)
+    return db_dispatch
 
 def get_dispatch(db: Session, dispatch_id: int):
-    return repository.get_dispatch(db, dispatch_id)
+    db_dispatch = db.query(models.Dispatch).filter(models.Dispatch.id == dispatch_id).first()
+    if db_dispatch is None:
+        raise HTTPException(status_code=404, detail="Dispatch not found")
+    return db_dispatch
 
 def update_dispatch(db: Session, dispatch_id: int, dispatch: schemas.DispatchCreate):
-    return repository.update_dispatch(db, dispatch_id, dispatch)
+    db_dispatch = db.query(models.Dispatch).filter(models.Dispatch.id == dispatch_id).first()
+    if db_dispatch is None:
+        raise HTTPException(status_code=404, detail="Dispatch not found")
+    for key, value in dispatch.dict().items():
+        setattr(db_dispatch, key, value)
+    db_dispatch.total_cost = db_dispatch.total_cost or 3000
+    db.commit()
+    db.refresh(db_dispatch)
+    return db_dispatch
 
 def delete_dispatch(db: Session, dispatch_id: int):
-    return repository.delete_dispatch(db, dispatch_id)
+    db_dispatch = db.query(models.Dispatch).filter(models.Dispatch.id == dispatch_id).first()
+    if db_dispatch is None:
+        raise HTTPException(status_code=404, detail="Dispatch not found")
+    db.delete(db_dispatch)
+    db.commit()
+    return db_dispatch
 
 def list_dispatches(db: Session, user_id: int, skip: int = 0, limit: int = 10):
-    return repository.list_dispatches(db, user_id, skip=skip, limit=limit)
+    return db.query(models.Dispatch).filter(models.Dispatch.user_id == user_id).offset(skip).limit(limit).all()

@@ -41,7 +41,7 @@ def test_user():
         "nombre": faker.name(),
         "correo": faker.email(),
         "password": faker.password(),
-        "role": "Cliente"  # Asegúrate de que el rol es "Cliente"
+        "role": "Cliente"  
     }
     response = client.post(
         "/users/",
@@ -90,7 +90,7 @@ def test_add_to_cart(test_db, token, test_sale):
     assert "id" in data
 
 def test_get_cart_items(test_db, token):
-    # Añadir un ítem al carrito para asegurar que hay datos
+    
     fake_cart_item = {
         "sale_id": 1,
         "quantity": faker.random_int(min=1, max=10)

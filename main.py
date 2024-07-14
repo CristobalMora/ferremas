@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from database import engine, Base
-from app.routers import user, auth, inventory, sales, cart, cart_summary, dispatch, payment
+from app.routers import user, auth, inventory, sales, cart, cart_summary, dispatch, payment, sucursal
 
 Base.metadata.create_all(bind=engine)
 
@@ -16,3 +16,4 @@ app.include_router(cart.router, prefix="/cart", tags=["cart"])
 app.include_router(cart_summary.router, prefix="/cart_summary", tags=["cart_summary"])
 app.include_router(dispatch.router, prefix="/dispatch", tags=["dispatch"])
 app.include_router(payment.router, prefix="/payments", tags=["payments"])
+app.include_router(sucursal.router, prefix="/sucursales", tags=["sucursales"])

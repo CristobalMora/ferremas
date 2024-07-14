@@ -64,7 +64,8 @@ def test_create_dispatch(test_db, token):
         "address": faker.address(),
         "username": faker.name(),
         "email": faker.email(),
-        "phone": faker.phone_number()
+        "phone": faker.phone_number(),
+        "total_cost": 3000
     }
     response = client.post(
         "/dispatch/",
@@ -77,6 +78,7 @@ def test_create_dispatch(test_db, token):
     assert data["username"] == fake_dispatch["username"]
     assert data["email"] == fake_dispatch["email"]
     assert data["phone"] == fake_dispatch["phone"]
+    assert data["total_cost"] == fake_dispatch["total_cost"]
     assert "id" in data
 
 def test_get_dispatch(test_db, token):
@@ -84,7 +86,8 @@ def test_get_dispatch(test_db, token):
         "address": faker.address(),
         "username": faker.name(),
         "email": faker.email(),
-        "phone": faker.phone_number()
+        "phone": faker.phone_number(),
+        "total_cost": 3000
     }
     create_response = client.post(
         "/dispatch/",
@@ -103,6 +106,7 @@ def test_get_dispatch(test_db, token):
     assert data["username"] == fake_dispatch["username"]
     assert data["email"] == fake_dispatch["email"]
     assert data["phone"] == fake_dispatch["phone"]
+    assert data["total_cost"] == fake_dispatch["total_cost"]
 
 def test_list_dispatches(test_db, token):
     response = client.get(
@@ -119,7 +123,8 @@ def test_update_dispatch(test_db, token):
         "address": faker.address(),
         "username": faker.name(),
         "email": faker.email(),
-        "phone": faker.phone_number()
+        "phone": faker.phone_number(),
+        "total_cost": 3000
     }
     create_response = client.post(
         "/dispatch/",
@@ -132,7 +137,8 @@ def test_update_dispatch(test_db, token):
         "address": faker.address(),
         "username": faker.name(),
         "email": faker.email(),
-        "phone": faker.phone_number()
+        "phone": faker.phone_number(),
+        "total_cost": 3000
     }
     response = client.put(
         f"/dispatch/{dispatch_id}",
@@ -145,13 +151,15 @@ def test_update_dispatch(test_db, token):
     assert data["username"] == updated_dispatch["username"]
     assert data["email"] == updated_dispatch["email"]
     assert data["phone"] == updated_dispatch["phone"]
+    assert data["total_cost"] == updated_dispatch["total_cost"]
 
 def test_delete_dispatch(test_db, token):
     fake_dispatch = {
         "address": faker.address(),
         "username": faker.name(),
         "email": faker.email(),
-        "phone": faker.phone_number()
+        "phone": faker.phone_number(),
+        "total_cost": 3000
     }
     create_response = client.post(
         "/dispatch/",
@@ -170,13 +178,15 @@ def test_delete_dispatch(test_db, token):
     assert data["username"] == fake_dispatch["username"]
     assert data["email"] == fake_dispatch["email"]
     assert data["phone"] == fake_dispatch["phone"]
+    assert data["total_cost"] == fake_dispatch["total_cost"]
 
 def test_create_dispatch_unauthorized(test_db):
     fake_dispatch = {
         "address": faker.address(),
         "username": faker.name(),
         "email": faker.email(),
-        "phone": faker.phone_number()
+        "phone": faker.phone_number(),
+        "total_cost": 3000
     }
     response = client.post("/dispatch/", json=fake_dispatch)
     assert response.status_code == 401, response.text
